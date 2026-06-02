@@ -23,14 +23,14 @@ class EventUploader {
   async sendEvent(eventData) {
     if (!API_URL) return false
 
-    const response = await fetch(API_URL, {
+    await fetch(API_URL, {
       method: 'POST',
-      mode: 'cors',
-      headers: { 'Content-Type': 'application/json' },
+      mode: 'no-cors',
       body: JSON.stringify(eventData),
     })
 
-    if (!response.ok) return false
+    // Apps Script web apps do not expose a readable CORS response.
+    // If the request reaches fetch without throwing, treat it as queued/sent.
     return true
   }
 
