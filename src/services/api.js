@@ -1,74 +1,53 @@
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = import.meta.env.VITE_API_URL || ''
+
+function toCsv(rows) {
+  const header = ['sessionId', 'eventType', 'x', 'y', 'value', 'pageUrl', 'timestamp']
+  const escapeCell = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
+
+  return [header.join(','), ...rows.map((row) => [
+    row.sessionId,
+    row.eventType,
+    row.x,
+    row.y,
+    row.value,
+    row.pageUrl,
+    row.timestamp,
+  ].map(escapeCell).join(','))].join('\n')
+}
 
 class EventUploader {
   constructor() {
-    this.pendingEvents = [];
-    this.isSending = false;
+    this.buffer = []
   }
 
   async sendEvent(eventData) {
-    if (!API_URL) {
-      console.warn('API URL not configured. Event not sent:', eventData);
-      return false;
-    }
+    if (!API_URL) return false
 
-    try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        mode: 'cors',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(eventData),
-      });
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(eventData),
+    })
 
-      const result = await response.json();
-      return result.success === true;
-    } catch (error) {
-      console.error('Failed to send event:', error);
-      return false;
-    }
+    if (!response.ok) return false
+    return true
   }
 
   async sendBatch(events) {
-    if (!API_URL) return false;
-    
-    try {
-      const promises = events.map(event => this.sendEvent(event));
-      const results = await Promise.all(promises);
-      return results.every(r => r === true);
-    } catch (error) {
-      console.error('Batch send failed:', error);
-      return false;
-    }
+    if (!API_URL || events.length === 0) return false
+    const results = await Promise.all(events.map((event) => this.sendEvent(event)))
+    return results.every(Boolean)
   }
 
   async exportData() {
-    if (!API_URL) throw new Error('API URL not configured');
-    
-    try {
-      const response = await fetch(`${API_URL}?export=csv`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'text/csv',
-        },
-      });
-      
-      if (!response.ok) throw new Error('Export failed');
-      
-      const csvData = await response.text();
-      return csvData;
-    } catch (error) {
-      console.error('Export failed:', error);
-      throw error;
-    }
+    return toCsv(this.buffer)
   }
 }
 
-export const eventUploader = new EventUploader();
+export const eventUploader = new EventUploader()
 
 export const trackEvent = async (sessionId, eventType, x = null, y = null, value = '', pageUrl = '') => {
-  const timestamp = Date.now();
   const eventData = {
     sessionId,
     eventType,
@@ -76,15 +55,16 @@ export const trackEvent = async (sessionId, eventType, x = null, y = null, value
     y: y !== null ? Number(y) : null,
     value: String(value),
     pageUrl: String(pageUrl),
-    timestamp,
-  };
-  
-  // Use sendBeacon for page unload events
-  if (eventType === 'session_end' && navigator.sendBeacon) {
-    const blob = new Blob([JSON.stringify(eventData)], { type: 'application/json' });
-    navigator.sendBeacon(API_URL, blob);
-    return true;
+    timestamp: Date.now(),
   }
-  
-  return await eventUploader.sendEvent(eventData);
-};
+
+  eventUploader.buffer.push(eventData)
+
+  if (eventType === 'session_end' && navigator.sendBeacon && API_URL) {
+    const blob = new Blob([JSON.stringify(eventData)], { type: 'application/json' })
+    navigator.sendBeacon(API_URL, blob)
+    return true
+  }
+
+  return eventUploader.sendEvent(eventData)
+}
